@@ -42,22 +42,18 @@ namespace MongoBsonExtensions
             {
                 if (val.IsBsonDocument)
                 {
-                    var doc = val.AsBsonDocument;
-
                     // Favourite.Foods
-                    if (!doc.TryGetValue(levels[i], out var element) || element == null)
+                    if (!val.AsBsonDocument.TryGetValue(levels[i], out val) || val == null)
                     {
                         // we have broken the chain, no matches found
                         return new List<BsonValue>();
                     }
 
-                    val = element;
-
                     // We are the final match in a . query
                     // e.g Favourite.Food, we are Food
                     if (IsLastNode(i, levels))
                     {
-                        return new List<BsonValue> { element };
+                        return new List<BsonValue> { val };
                     }
                 }
 
@@ -93,31 +89,18 @@ namespace MongoBsonExtensions
         private static IEnumerable<BsonValue> ProcessArray(BsonArray array, string[] levels)
             => array
                 .Where(e => e != null)
-
-                // For each element in the array
-                // Continue parsing through the levels
                 .SelectMany(e => levels
+                    .SelectMany((l, idx) => ParseInnerArray(idx, e, levels)));
 
-                    // Check the array element at the current level
-                    .SelectMany((l, idx) =>
-                    {
-                        if (e.IsBsonArray)
-                        {
-                            // .$[]
-                            // [ 1,2,3,4,5 ]
-                            if (e.IsBsonArray && IsLastNode(idx, levels) && levels[idx] == "$[]")
-                            {
-                                return e.AsBsonArray.Select(_ => _).ToList();
-                            }
+        private static IEnumerable<BsonValue> ParseInnerArray(int level, BsonValue element, string[] levels)
+            => element.IsBsonArray
+                ? ParseInnerArrayArray(level, element.AsBsonArray, levels)
+                : TryGet(element, levels.Skip(level + 1).ToArray());
 
-                            // [ [ ] ] 
-                            // $[].$[]...
-                            return ProcessArray(e.AsBsonArray, levels.Skip(idx + 2).ToArray());
-                        }
-
-                        // [ { ... } ] 
-                        return TryGet(e, levels.Skip(idx + 1).ToArray());
-                    }));
+        private static IEnumerable<BsonValue> ParseInnerArrayArray(int level, BsonArray array, string[] levels) =>
+            IsLastNode(level, levels) && levels[level] == "$[]"
+                ? array.Select(_ => _)  // [ 1,2,3,4,5 ] = "$[]" / ".$[]" 
+                : ProcessArray(array, levels.Skip(level + 2).ToArray());    // [ [ ] ] = "$[].$[]"
 
         private static bool IsLastNode(int current, string[] levels)
             => current == levels.Length - 1;
